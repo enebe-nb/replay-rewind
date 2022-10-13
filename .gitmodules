@@ -1,0 +1,3 @@
+[submodule "thirdparty/SokuLib"]
+	path = thirdparty/SokuLib
+	url = https://github.com/SokuDev/SokuLib
