@@ -3,16 +3,6 @@
 
 #define _offset(base, off) (uint8_t*)((int)&base + (off))
 
-namespace {
-    struct GOHeader {
-        void* owner;
-        SokuLib::Action actionId;
-        SokuLib::Vector2f pos;
-        SokuLib::Direction dir;
-        unsigned char layerMaybe;
-    };
-}
-
 static inline uint8_t* createChunk(uint8_t* data, size_t size) {
     uint8_t* chunk = new uint8_t[size + 4];
     *(uint32_t*)chunk = size;
@@ -97,6 +87,9 @@ bool Serializer::serialize(const SokuLib::BattleManager& data) {
         for (auto val : inputQueue) { *(uint16_t*)chunk = val; chunk += 2; }
     }
 
+    // Weather
+    serialize((uint8_t*)0x8971c0, 0x10);
+
     return true;
 }
 
@@ -117,10 +110,10 @@ bool Serializer::serialize(const SokuLib::v2::GameObjectBase& data) {
 bool Serializer::serialize(const SokuLib::v2::GameObject& data) {
     serialize((SokuLib::v2::GameObjectBase&)data);
     chunkQueue.push_back(createChunk(_offset(data, 0x34C), 0x004));
-    chunkQueue.push_back(createChunk(_offset(data, 0x358), 0x044));
+    chunkQueue.push_back(createChunk(_offset(data, 0x360), 0x03C));
     // TODO check 354/35C
     if (data.unknown354) throw std::runtime_error("Serializer: GameObject+0x354 != null");
-    chunkQueue.push_back(createChunk((uint8_t*)data.unknown35C, gameObject35C[(void*)&data] * 4));
+    // chunkQueue.push_back(createChunk((uint8_t*)data.unknown35C, gameObject35C[(void*)&data].second * 4));
     if (data.parentB) throw std::runtime_error("Serializer: GameObject+0x3A0 != null");
 
     if (((SokuLib::v2::Player*)data.gameData.owner)->characterIndex == SokuLib::CHARACTER_ALICE) {
@@ -170,8 +163,9 @@ bool Serializer::serialize(const SokuLib::v2::Player& data) {
         size_t objectCount = data.objectList->VUnknown24()->size();
         chunkQueue.push_back(createChunk((uint8_t*)&objectCount, 4));
         for (auto object : *data.objectList->VUnknown24()) {
-            GOHeader header {object->gameData.owner2, object->frameState.actionId, object->position, object->direction, object->unknown358[0] };
+            auto& header = gameObject35C[(void*)object];
             chunkQueue.push_back(createChunk((uint8_t*)&header, sizeof(header)));
+            chunkQueue.push_back(createChunk((uint8_t*)&object->unknown35C, header.size * 4));
             serialize(*object);
         }
     }
@@ -188,6 +182,14 @@ bool Serializer::restore(SokuLib::BattleManager& data) {
     restoreChunk(chunkQueue.front(), _offset(data, 0x004), 0x018); chunkQueue.pop_front();
     // TODO test
     restoreChunk(chunkQueue.front(), _offset(data, 0x074), 0x018); chunkQueue.pop_front();
+    // restoreChunk(chunkQueue.front(), _offset(data, 0x074), 0x070); chunkQueue.pop_front();
+    // restoreChunk(chunkQueue.front(), _offset(data, 0x0F0), 0x010); chunkQueue.pop_front();
+    // restoreChunk(chunkQueue.front(), _offset(data, 0x22C), 0x05C); chunkQueue.pop_front();
+    // restoreChunk(chunkQueue.front(), _offset(data, 0x3B4), 0x080); chunkQueue.pop_front();
+    // restoreChunk(chunkQueue.front(), _offset(data, 0x468), 0x020); chunkQueue.pop_front();
+    // restoreChunk(chunkQueue.front(), _offset(data, 0x52C), 0x03C); chunkQueue.pop_front();
+    // restoreChunk(chunkQueue.front(), _offset(data, 0x84C), 0x010); chunkQueue.pop_front();
+    // restoreChunk(chunkQueue.front(), _offset(data, 0x868), 0x09C); chunkQueue.pop_front();
 
     restore(*(SokuLib::v2::Player*)&data.leftCharacterManager);
     restore(_offset(data, 0x890), GetPlayerExtraSize(((SokuLib::v2::Player*)&data.leftCharacterManager)->characterIndex));
@@ -205,6 +207,9 @@ bool Serializer::restore(SokuLib::BattleManager& data) {
         inputQueue.clear(); while (size--) { inputQueue.push_back(*(uint16_t*)chunk); chunk += 2; }
         delete[] chunkQueue.front(); chunkQueue.pop_front();
     }
+
+    // Weather
+    restore((uint8_t*)0x8971c0, 0x10);
 
     return true;
 }
@@ -224,15 +229,15 @@ bool Serializer::restore(SokuLib::v2::GameObjectBase& data) {
 bool Serializer::restore(SokuLib::v2::GameObject& data) {
     restore((SokuLib::v2::GameObjectBase&)data);
     restoreChunk(chunkQueue.front(), _offset(data, 0x34C), 0x004); chunkQueue.pop_front();
-    restoreChunk(chunkQueue.front(), _offset(data, 0x358), 0x044); chunkQueue.pop_front();
+    restoreChunk(chunkQueue.front(), _offset(data, 0x360), 0x03C); chunkQueue.pop_front();
 
-    { // unknown35C
-        uint8_t* chunk = chunkQueue.front();
-        uint32_t size = *(uint32_t*)chunk; chunk += 4;
-        if (size) { data.unknown35C = SokuLib::NewFct(size); memcpy(data.unknown35C, chunk, size); }
-        gameObject35C[(void*)&data] = size / 4;
-        delete[] chunkQueue.front(); chunkQueue.pop_front();
-    }
+    // { // unknown35C
+    //     uint8_t* chunk = chunkQueue.front();
+    //     uint32_t size = *(uint32_t*)chunk; chunk += 4;
+    //     if (size) { data.unknown35C = SokuLib::NewFct(size); memcpy(data.unknown35C, chunk, size); }
+    //     gameObject35C[(void*)&data].second = size / 4;
+    //     delete[] chunkQueue.front(); chunkQueue.pop_front();
+    // }
 
     if (((SokuLib::v2::Player*)data.gameData.owner)->characterIndex == SokuLib::CHARACTER_ALICE) {
         restoreChunk(chunkQueue.front(), _offset(data, 0x3AC), 0x004);
@@ -284,7 +289,9 @@ bool Serializer::restore(SokuLib::v2::Player& data) {
         uint32_t size; restoreChunk(chunkQueue.front(), (uint8_t*)&size, 4); chunkQueue.pop_front();
         data.objectList->VUnknown08(); while (size--) {
             GOHeader header; restoreChunk(chunkQueue.front(), (uint8_t*)&header, sizeof(header)); chunkQueue.pop_front();
-            restore(*data.objectList->VUnknown04(0, header.owner, header.actionId, header.pos.x, header.pos.y, header.dir, header.layerMaybe, 0, 0));
+            auto object = data.objectList->VUnknown04(0, header.owner, header.actionId, header.x, header.y, header.dir, header.layerMaybe, 0, header.size);
+            restoreChunk(chunkQueue.front(), (uint8_t*)object->unknown35C, header.size * 4); chunkQueue.pop_front();
+            restore(*object);
         }
     }
 

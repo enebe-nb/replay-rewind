@@ -4,7 +4,7 @@
 
 // global variable initialization
 std::filesystem::path modulePath;
-std::unordered_map<void*, size_t> gameObject35C;
+std::unordered_map<void*, GOHeader> gameObject35C;
 
 #ifdef _DEBUG
 std::ofstream logging("replay-track.log");
@@ -23,13 +23,16 @@ namespace {
     std::deque<uint8_t*> test;
 
     bool _SpawnObjectIsSet = false;
-    typedef SokuLib::v2::GameObject* (__fastcall * SpawnObject_t) (void*, int, void*, void*, SokuLib::Action, float, float, SokuLib::Direction, int, int, int);
+    typedef SokuLib::v2::GameObject* (__fastcall * SpawnObject_t) (void*, int, void*, void*, SokuLib::Action, float, float, SokuLib::Direction, unsigned char, int, size_t);
     SpawnObject_t orig_SpawnObject[2];
     template <SpawnObject_t& orig>
-    static SokuLib::v2::GameObject* __fastcall SpawnObject(void* self, int unused, void* a, void* b, SokuLib::Action c, float d, float e, SokuLib::Direction f, int g, int h, int size) {
-        gameObject35C[self] = size;
-        return orig(self, unused, a, b, c, d, e, f, g, h, size);
+    static SokuLib::v2::GameObject* __fastcall SpawnObject(void* self, int unused, void* parent, void* owner, SokuLib::Action actionId, float x, float y, SokuLib::Direction dir, unsigned char layer, int data, size_t size) {
+        auto object = orig(self, unused, parent, owner, actionId, x, y, dir, layer, data, size);
+        gameObject35C[(void*)object] = {owner, actionId, x, y, dir, layer, size};
+        return object;
     }
+
+    int looplimiting = 0;
 }
 
 void* __fastcall BM_OnDestruct(SokuLib::BattleManager* self, int a, int b) {
@@ -46,11 +49,14 @@ int __fastcall BM_OnBattleFrame(SokuLib::BattleManager* self) {
     if (SokuLib::subMode != SokuLib::BATTLE_SUBMODE_REPLAY) return orig_BM_OnBattleFrame(self);
 
     if (!_SpawnObjectIsSet) {
+        // TODO just hook all characters in the dll main
+        DWORD old; VirtualProtect((LPVOID)RDATA_SECTION_OFFSET, RDATA_SECTION_SIZE, PAGE_WRITECOPY, &old);
         _SpawnObjectIsSet = true;
-        orig_SpawnObject[0] = ((SpawnObject_t*)&self->leftCharacterManager.objects)[1];
-        ((SpawnObject_t*)&self->leftCharacterManager.objects)[1] = SpawnObject<orig_SpawnObject[0]>;
-        orig_SpawnObject[1] = ((SpawnObject_t*)&self->rightCharacterManager.objects)[1];
-        ((SpawnObject_t*)&self->rightCharacterManager.objects)[1] = SpawnObject<orig_SpawnObject[1]>;
+        orig_SpawnObject[0] = ((SpawnObject_t**)&self->leftCharacterManager.objects)[0][1];
+        ((SpawnObject_t**)&self->leftCharacterManager.objects)[0][1] = SpawnObject<orig_SpawnObject[0]>;
+        orig_SpawnObject[1] = ((SpawnObject_t**)&self->rightCharacterManager.objects)[0][1];
+        ((SpawnObject_t**)&self->rightCharacterManager.objects)[0][1] = SpawnObject<orig_SpawnObject[1]>;
+        VirtualProtect((LPVOID)RDATA_SECTION_OFFSET, RDATA_SECTION_SIZE, old, &old);
     }
 
     if (SokuLib::inputMgrs.input.horizontalAxis < 0) {
@@ -61,6 +67,7 @@ int __fastcall BM_OnBattleFrame(SokuLib::BattleManager* self) {
         } catch (std::exception e) {
             MessageBoxA(0, e.what(), "Replay Rewind", MB_OK);
         }
+        --self->frameCount; // revert change on calling function
         return 0;
     }
 
@@ -70,6 +77,29 @@ int __fastcall BM_OnBattleFrame(SokuLib::BattleManager* self) {
     } catch (std::exception e) {
         MessageBoxA(0, e.what(), "Replay Rewind", MB_OK);
     }
+
+    // if (SokuLib::inputMgrs.input.verticalAxis == 1) ++looplimiting;
+    // else if (SokuLib::inputMgrs.input.verticalAxis == -1) {
+    //     --looplimiting;
+    //     if (looplimiting < 0) looplimiting = 0;
+    // }
+
+    // if (self->frameCount % 60 == 0) {
+    //     if (battleState.size() > looplimiting) try {
+    //         Serializer serializer(battleState.back());
+    //         serializer.restore(SokuLib::getBattleMgr());
+    //         battleState.pop_back();
+    //         --self->frameCount; // revert change on calling function
+    //         return 0;
+    //     } catch (std::exception e) {
+    //         MessageBoxA(0, e.what(), "Replay Rewind", MB_OK);
+    //     } else try {
+    //         Serializer serializer(battleState.emplace_back());
+    //         serializer.serialize(SokuLib::getBattleMgr());
+    //     } catch (std::exception e) {
+    //         MessageBoxA(0, e.what(), "Replay Rewind", MB_OK);
+    //     }
+    // }
 
     return orig_BM_OnBattleFrame(self);
 }
