@@ -10,10 +10,11 @@ struct GOHeader {
     SokuLib::Direction dir;
     unsigned char layerMaybe;
     size_t size;
+    int parentIndex;
 };
 
 extern std::filesystem::path modulePath;
-extern std::unordered_map<void*, GOHeader> gameObject35C;
+extern std::unordered_map<void*, GOHeader> goHeaders;
 
 #ifdef _DEBUG
 #include <fstream>
