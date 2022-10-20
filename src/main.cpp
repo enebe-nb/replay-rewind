@@ -80,6 +80,7 @@ int __fastcall BM_OnBattleFrame(SokuLib::BattleManager* self) {
             battleState.pop_back();
         }
         --self->frameCount; // revert change on calling function
+        SokuLib::camera.update();
         return 0;
     }
 

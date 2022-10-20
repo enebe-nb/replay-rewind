@@ -5,8 +5,9 @@
 
 namespace {
     struct Unknown354Data {
-        int length;
-        int x04, x08, x10, x14;
+        int length; int actionId;
+        int x04, x08, x14;
+        float x10;
     };
 }
 
@@ -95,8 +96,10 @@ bool Serializer::serialize(const SokuLib::BattleManager& data) {
     }
 
     // Globals (Weather)
-    serialize((uint8_t*)0x8971c0, 0x10);
     serialize((uint8_t*)0x883cc8, 0x04);
+    serialize((uint8_t*)0x8971c0, 0x18);
+    serialize((uint8_t*)0x8985d8, 0x04);
+    serialize((uint8_t*)0x8986dc, 0x04);
 
     return true;
 }
@@ -119,15 +122,15 @@ bool Serializer::serialize(const SokuLib::v2::GameObject& data) {
     serialize((SokuLib::v2::GameObjectBase&)data);
     chunkQueue.push_back(createChunk(_offset(data, 0x34C), 0x004));
     chunkQueue.push_back(createChunk(_offset(data, 0x354), 0x008));
-    if (data.unknown354) {
-        Unknown354Data adata;
-        adata.length = ((uint32_t*)data.unknown354)[14];
-        adata.x04 = ((uint32_t*)data.unknown354)[1];
-        adata.x08 = ((uint32_t*)data.unknown354)[2];
-        adata.x10 = ((uint32_t*)data.unknown354)[4];
-        adata.x14 = ((uint32_t*)data.unknown354)[5];
-        chunkQueue.push_back(createChunk((uint8_t*)&adata, sizeof(adata)));
-    }
+    // if (data.unknown354) {
+    //     Unknown354Data adata;
+    //     adata.length = data.unknown354->unknown28.size();
+    //     adata.x04 = data.unknown354->paramB;
+    //     adata.x08 = data.unknown354->paramC;
+    //     adata.x10 = data.unknown354->paramA;
+    //     adata.x14 = data.unknown354->paramD;
+    //     chunkQueue.push_back(createChunk((uint8_t*)&adata, sizeof(adata)));
+    // }
     chunkQueue.push_back(createChunk(_offset(data, 0x360), 0x03C));
 
     if (((SokuLib::v2::Player*)data.gameData.owner)->characterIndex == SokuLib::CHARACTER_ALICE) {
@@ -230,8 +233,10 @@ bool Serializer::restore(SokuLib::BattleManager& data) {
     }
 
     // Globals (Weather)
-    restore((uint8_t*)0x8971c0, 0x10);
     restore((uint8_t*)0x883cc8, 0x04);
+    restore((uint8_t*)0x8971c0, 0x18);
+    restore((uint8_t*)0x8985d8, 0x04);
+    restore((uint8_t*)0x8986dc, 0x04);
 
     return true;
 }
@@ -252,15 +257,12 @@ bool Serializer::restore(SokuLib::v2::GameObject& data) {
     restore((SokuLib::v2::GameObjectBase&)data);
     restoreChunk(chunkQueue.front(), _offset(data, 0x34C), 0x004); chunkQueue.pop_front();
     restoreChunk(chunkQueue.front(), _offset(data, 0x354), 0x008); chunkQueue.pop_front();
-    if (data.unknown354) {
-        Unknown354Data adata;
-        restoreChunk(chunkQueue.front(), (uint8_t*)&adata, sizeof(adata)); chunkQueue.pop_front();
-        data.unknown354 = 0;
-        // TODO
-        reinterpret_cast<void(__fastcall*)(void*, int, SokuLib::Action, int, int, int, int)>(0x4b0f50)
-            (&data, 0, data.frameState.actionId, adata.x10, adata.x04, adata.x08, adata.x14);
-        while(((uint32_t*)data.unknown354)[14] < adata.length) reinterpret_cast<void(__fastcall*)(void*)>(0x434230)(data.unknown354);
-    }
+    data.tail = 0;
+        // Unknown354Data adata;
+        // restoreChunk(chunkQueue.front(), (uint8_t*)&adata, sizeof(adata)); chunkQueue.pop_front();
+        // data.unknown354 = 0;
+        // data.spawnParticles(data.frameState.actionId, adata.x10, adata.x04, adata.x08, adata.x14);
+        // while(data.unknown354->unknown28.size() < adata.length) data.unknown354->update();
     restoreChunk(chunkQueue.front(), _offset(data, 0x360), 0x03C); chunkQueue.pop_front();
 
     if (((SokuLib::v2::Player*)data.gameData.owner)->characterIndex == SokuLib::CHARACTER_ALICE) {
