@@ -3,14 +3,6 @@
 
 #define _offset(base, off) (uint8_t*)((int)&base + (off))
 
-namespace {
-    struct Unknown354Data {
-        int length; int actionId;
-        int x04, x08, x14;
-        float x10;
-    };
-}
-
 static inline uint8_t* createChunk(uint8_t* data, size_t size) {
     uint8_t* chunk = new uint8_t[size + 4];
     *(uint32_t*)chunk = size;
@@ -27,6 +19,11 @@ static inline void restoreChunk(uint8_t* chunk, uint8_t* data, size_t size) {
     if (size != *(uint32_t*)chunk) throw std::exception("Restore: Size mismatch");
     memcpy(data, chunk + 4, size);
     delete[] chunk;
+}
+
+static inline void compareChunk(uint8_t* chunk, uint8_t* data, size_t size) {
+    if (size != *(uint32_t*)chunk) throw std::exception("Compare: Size mismatch");
+    if (memcmp(data, chunk + 4, size)) throw std::exception("Compare: Data mismatch");
 }
 
 static int inline GetPlayerExtraSize(SokuLib::Character character) {
@@ -55,8 +52,8 @@ static int inline GetPlayerExtraSize(SokuLib::Character character) {
         case SokuLib::CHARACTER_REIMU: return 0x2C;
         case SokuLib::CHARACTER_ALICE: return 0x34;
         case SokuLib::CHARACTER_YUKARI: return 0x44;
-        case SokuLib::CHARACTER_YOUMU: return 0x5C;
-        case SokuLib::CHARACTER_TENSHI: return 0x78;
+        case SokuLib::CHARACTER_YOUMU: return 0x5C; // TODO test
+        case SokuLib::CHARACTER_TENSHI: return 0x78; // TODO test
     } return 0;
 }
 
@@ -65,18 +62,20 @@ bool Serializer::serialize(uint8_t* data, size_t size) {
     return true;
 }
 
+bool Serializer::restore(uint8_t* data, size_t size) {
+    restoreChunk(chunkQueue.front(), data, size); chunkQueue.pop_front();
+    return true;
+}
+
+bool Serializer::compare(uint8_t* data, size_t size) {
+    compareChunk(*iter++, data, size);
+    return true;
+}
+
 bool Serializer::serialize(const SokuLib::BattleManager& data) {
     chunkQueue.push_back(createChunk(_offset(data, 0x004), 0x018));
-    // TODO test
     chunkQueue.push_back(createChunk(_offset(data, 0x074), 0x018));
-    // chunkQueue.push_back(createChunk(_offset(data, 0x074), 0x070));
-    // chunkQueue.push_back(createChunk(_offset(data, 0x0F0), 0x010));
-    // chunkQueue.push_back(createChunk(_offset(data, 0x22C), 0x05C));
-    // chunkQueue.push_back(createChunk(_offset(data, 0x3B4), 0x080));
-    // chunkQueue.push_back(createChunk(_offset(data, 0x468), 0x020));
-    // chunkQueue.push_back(createChunk(_offset(data, 0x52C), 0x03C));
-    // chunkQueue.push_back(createChunk(_offset(data, 0x84C), 0x010));
-    // chunkQueue.push_back(createChunk(_offset(data, 0x868), 0x09C));
+    chunkQueue.push_back(createChunk(_offset(data, 0x868), 0x09C));
 
     serialize(*(SokuLib::v2::Player*)&data.leftCharacterManager);
     serialize(_offset(data, 0x890), GetPlayerExtraSize(((SokuLib::v2::Player*)&data.leftCharacterManager)->characterIndex));
@@ -104,8 +103,80 @@ bool Serializer::serialize(const SokuLib::BattleManager& data) {
     return true;
 }
 
+bool Serializer::restore(SokuLib::BattleManager& data) {
+    restoreChunk(chunkQueue.front(), _offset(data, 0x004), 0x018); chunkQueue.pop_front();
+    restoreChunk(chunkQueue.front(), _offset(data, 0x074), 0x018); chunkQueue.pop_front();
+    restoreChunk(chunkQueue.front(), _offset(data, 0x868), 0x09C); chunkQueue.pop_front();
+
+    restore(*(SokuLib::v2::Player*)&data.leftCharacterManager);
+    restore(_offset(data, 0x890), GetPlayerExtraSize(((SokuLib::v2::Player*)&data.leftCharacterManager)->characterIndex));
+    restore(*(SokuLib::v2::Player*)&data.rightCharacterManager);
+    restore(_offset(data, 0x890), GetPlayerExtraSize(((SokuLib::v2::Player*)&data.rightCharacterManager)->characterIndex));
+
+    // Random Seed
+    restore((uint8_t*)0x89b660, 0x9C0);
+    restore((uint8_t*)0x896b20, 0x004);
+
+    { // Input queue
+        SokuLib::Deque<unsigned short>& inputQueue = *reinterpret_cast<SokuLib::Deque<unsigned short>*>(*(int*)((int)&SokuLib::inputMgr + 0x104) + 0x3c);
+        uint8_t* chunk = chunkQueue.front();
+        uint32_t size = *(uint32_t*)chunk; chunk += 4;
+        inputQueue.clear(); while (size--) { inputQueue.push_back(*(uint16_t*)chunk); chunk += 2; }
+        delete[] chunkQueue.front(); chunkQueue.pop_front();
+    }
+
+    // Globals (Weather)
+    restore((uint8_t*)0x883cc8, 0x04);
+    restore((uint8_t*)0x8971c0, 0x18);
+    restore((uint8_t*)0x8985d8, 0x04);
+    restore((uint8_t*)0x8986dc, 0x04);
+
+    return true;
+}
+
+bool Serializer::compare(SokuLib::BattleManager& data) {
+    compareChunk(*iter++, _offset(data, 0x004), 0x018);
+    compareChunk(*iter++, _offset(data, 0x074), 0x018);
+    compareChunk(*iter++, _offset(data, 0x868), 0x09C);
+
+    compare(*(SokuLib::v2::Player*)&data.leftCharacterManager);
+    compare(_offset(data, 0x890), GetPlayerExtraSize(((SokuLib::v2::Player*)&data.leftCharacterManager)->characterIndex));
+    compare(*(SokuLib::v2::Player*)&data.rightCharacterManager);
+    compare(_offset(data, 0x890), GetPlayerExtraSize(((SokuLib::v2::Player*)&data.rightCharacterManager)->characterIndex));
+
+    // Random Seed
+    compare((uint8_t*)0x89b660, 0x9C0);
+    compare((uint8_t*)0x896b20, 0x004);
+
+    { // Input queue
+        SokuLib::Deque<unsigned short>& inputQueue = *reinterpret_cast<SokuLib::Deque<unsigned short>*>(*(int*)((int)&SokuLib::inputMgr + 0x104) + 0x3c);
+        uint8_t* chunk = *iter++;
+        uint32_t size = *(uint32_t*)chunk; chunk += 4;
+        if (size != inputQueue.size()) throw std::exception("Compare: Size mismatch");
+        for (auto val : inputQueue) { if (*(uint16_t*)chunk != val) throw std::exception("Compare: Value mismatch"); chunk += 2; }
+    }
+
+    // Globals (Weather)
+    compare((uint8_t*)0x883cc8, 0x04);
+    compare((uint8_t*)0x8971c0, 0x18);
+    compare((uint8_t*)0x8985d8, 0x04);
+    compare((uint8_t*)0x8986dc, 0x04);
+
+    return true;
+}
+
 bool Serializer::serialize(const SokuLib::v2::AnimationObject& data) {
     chunkQueue.push_back(createChunk(_offset(data, 0x0EC), 0x068));
+    return true;
+}
+
+bool Serializer::restore(SokuLib::v2::AnimationObject& data) {
+    restoreChunk(chunkQueue.front(), _offset(data, 0x0EC), 0x068); chunkQueue.pop_front();
+    return true;
+}
+
+bool Serializer::compare(SokuLib::v2::AnimationObject& data) {
+    compareChunk(*iter++,  _offset(data, 0x0EC), 0x068);
     return true;
 }
 
@@ -115,6 +186,20 @@ bool Serializer::serialize(const SokuLib::v2::GameObjectBase& data) {
     chunkQueue.push_back(createChunk(_offset(data, 0x184), 0x02C));
     // TODO check 1B0
     if (data.unknown1B0) throw std::runtime_error("Serializer: GameObjectBase+0x1B0 != null");
+    return true;
+}
+
+bool Serializer::restore(SokuLib::v2::GameObjectBase& data) {
+    restore((SokuLib::v2::AnimationObject&)data);
+    restoreChunk(chunkQueue.front(), _offset(data, 0x158), 0x01C); chunkQueue.pop_front();
+    restoreChunk(chunkQueue.front(), _offset(data, 0x184), 0x02C); chunkQueue.pop_front();
+    return true;
+}
+
+bool Serializer::compare(SokuLib::v2::GameObjectBase& data) {
+    compare((SokuLib::v2::AnimationObject&)data);
+    compareChunk(*iter++,  _offset(data, 0x158), 0x01C);
+    compareChunk(*iter++,  _offset(data, 0x184), 0x02C);
     return true;
 }
 
@@ -137,6 +222,40 @@ bool Serializer::serialize(const SokuLib::v2::GameObject& data) {
         chunkQueue.push_back(createChunk(_offset(data, 0x3AC), 0x004));
     }
     
+    return true;
+}
+
+bool Serializer::restore(SokuLib::v2::GameObject& data) {
+    restore((SokuLib::v2::GameObjectBase&)data);
+    restoreChunk(chunkQueue.front(), _offset(data, 0x34C), 0x004); chunkQueue.pop_front();
+    restoreChunk(chunkQueue.front(), _offset(data, 0x354), 0x008); chunkQueue.pop_front();
+    data.tail = 0;
+        // Unknown354Data adata;
+        // restoreChunk(chunkQueue.front(), (uint8_t*)&adata, sizeof(adata)); chunkQueue.pop_front();
+        // data.unknown354 = 0;
+        // data.spawnParticles(data.frameState.actionId, adata.x10, adata.x04, adata.x08, adata.x14);
+        // while(data.unknown354->unknown28.size() < adata.length) data.unknown354->update();
+    restoreChunk(chunkQueue.front(), _offset(data, 0x360), 0x03C); chunkQueue.pop_front();
+
+    if (((SokuLib::v2::Player*)data.gameData.owner)->characterIndex == SokuLib::CHARACTER_ALICE) {
+        restoreChunk(chunkQueue.front(), _offset(data, 0x3AC), 0x004);
+        chunkQueue.pop_front();
+    }
+
+    return true;
+}
+
+bool Serializer::compare(SokuLib::v2::GameObject& data) {
+    compare((SokuLib::v2::GameObjectBase&)data);
+    compareChunk(*iter++,  _offset(data, 0x34C), 0x004);
+    compareChunk(*iter++,  _offset(data, 0x354), 0x008);
+    // ignore tail
+    compareChunk(*iter++,  _offset(data, 0x360), 0x03C);
+
+    if (((SokuLib::v2::Player*)data.gameData.owner)->characterIndex == SokuLib::CHARACTER_ALICE) {
+        compareChunk(*iter++,  _offset(data, 0x3AC), 0x004);
+    }
+
     return true;
 }
 
@@ -190,84 +309,7 @@ bool Serializer::serialize(const SokuLib::v2::Player& data) {
             chunkQueue.push_back(createChunk((uint8_t*)&header, sizeof(header)));
             chunkQueue.push_back(createChunk((uint8_t*)object->unknown35C, header.size * 4));
             serialize(*object);
-            reinterpret_cast<void (__fastcall*)(void*)>(0x43a250)(object); // Update Sprite
         }
-    }
-
-    return true;
-}
-
-bool Serializer::restore(uint8_t* data, size_t size) {
-    restoreChunk(chunkQueue.front(), data, size); chunkQueue.pop_front();
-    return true;
-}
-
-bool Serializer::restore(SokuLib::BattleManager& data) {
-    restoreChunk(chunkQueue.front(), _offset(data, 0x004), 0x018); chunkQueue.pop_front();
-    // TODO test
-    restoreChunk(chunkQueue.front(), _offset(data, 0x074), 0x018); chunkQueue.pop_front();
-    // restoreChunk(chunkQueue.front(), _offset(data, 0x074), 0x070); chunkQueue.pop_front();
-    // restoreChunk(chunkQueue.front(), _offset(data, 0x0F0), 0x010); chunkQueue.pop_front();
-    // restoreChunk(chunkQueue.front(), _offset(data, 0x22C), 0x05C); chunkQueue.pop_front();
-    // restoreChunk(chunkQueue.front(), _offset(data, 0x3B4), 0x080); chunkQueue.pop_front();
-    // restoreChunk(chunkQueue.front(), _offset(data, 0x468), 0x020); chunkQueue.pop_front();
-    // restoreChunk(chunkQueue.front(), _offset(data, 0x52C), 0x03C); chunkQueue.pop_front();
-    // restoreChunk(chunkQueue.front(), _offset(data, 0x84C), 0x010); chunkQueue.pop_front();
-    // restoreChunk(chunkQueue.front(), _offset(data, 0x868), 0x09C); chunkQueue.pop_front();
-
-    restore(*(SokuLib::v2::Player*)&data.leftCharacterManager);
-    restore(_offset(data, 0x890), GetPlayerExtraSize(((SokuLib::v2::Player*)&data.leftCharacterManager)->characterIndex));
-    restore(*(SokuLib::v2::Player*)&data.rightCharacterManager);
-    restore(_offset(data, 0x890), GetPlayerExtraSize(((SokuLib::v2::Player*)&data.rightCharacterManager)->characterIndex));
-
-    // Random Seed
-    restore((uint8_t*)0x89b660, 0x9C0);
-    restore((uint8_t*)0x896b20, 0x004);
-
-    { // Input queue
-        SokuLib::Deque<unsigned short>& inputQueue = *reinterpret_cast<SokuLib::Deque<unsigned short>*>(*(int*)((int)&SokuLib::inputMgr + 0x104) + 0x3c);
-        uint8_t* chunk = chunkQueue.front();
-        uint32_t size = *(uint32_t*)chunk; chunk += 4;
-        inputQueue.clear(); while (size--) { inputQueue.push_back(*(uint16_t*)chunk); chunk += 2; }
-        delete[] chunkQueue.front(); chunkQueue.pop_front();
-    }
-
-    // Globals (Weather)
-    restore((uint8_t*)0x883cc8, 0x04);
-    restore((uint8_t*)0x8971c0, 0x18);
-    restore((uint8_t*)0x8985d8, 0x04);
-    restore((uint8_t*)0x8986dc, 0x04);
-
-    return true;
-}
-
-bool Serializer::restore(SokuLib::v2::AnimationObject& data) {
-    restoreChunk(chunkQueue.front(), _offset(data, 0x0EC), 0x068); chunkQueue.pop_front();
-    return true;
-}
-
-bool Serializer::restore(SokuLib::v2::GameObjectBase& data) {
-    restore((SokuLib::v2::AnimationObject&)data);
-    restoreChunk(chunkQueue.front(), _offset(data, 0x158), 0x01C); chunkQueue.pop_front();
-    restoreChunk(chunkQueue.front(), _offset(data, 0x184), 0x02C); chunkQueue.pop_front();
-    return true;
-}
-
-bool Serializer::restore(SokuLib::v2::GameObject& data) {
-    restore((SokuLib::v2::GameObjectBase&)data);
-    restoreChunk(chunkQueue.front(), _offset(data, 0x34C), 0x004); chunkQueue.pop_front();
-    restoreChunk(chunkQueue.front(), _offset(data, 0x354), 0x008); chunkQueue.pop_front();
-    data.tail = 0;
-        // Unknown354Data adata;
-        // restoreChunk(chunkQueue.front(), (uint8_t*)&adata, sizeof(adata)); chunkQueue.pop_front();
-        // data.unknown354 = 0;
-        // data.spawnParticles(data.frameState.actionId, adata.x10, adata.x04, adata.x08, adata.x14);
-        // while(data.unknown354->unknown28.size() < adata.length) data.unknown354->update();
-    restoreChunk(chunkQueue.front(), _offset(data, 0x360), 0x03C); chunkQueue.pop_front();
-
-    if (((SokuLib::v2::Player*)data.gameData.owner)->characterIndex == SokuLib::CHARACTER_ALICE) {
-        restoreChunk(chunkQueue.front(), _offset(data, 0x3AC), 0x004);
-        chunkQueue.pop_front();
     }
 
     return true;
@@ -330,6 +372,62 @@ bool Serializer::restore(SokuLib::v2::Player& data) {
     }
 
     reinterpret_cast<void (__fastcall*)(void*)>(0x43a250)(&data); // Update Sprite
+
+    return true;
+}
+
+bool Serializer::compare(SokuLib::v2::Player& data) {
+    compare((SokuLib::v2::GameObjectBase&)data);
+    compareChunk(*iter++,  _offset(data, 0x498), 0x0E4);
+
+    {
+        uint8_t* chunk = *iter++;
+        if (memcmp(_offset(data, 0x5C4), chunk, 32)) throw std::exception("Compare: Data mismatch"); chunk += 32;
+        uint32_t size = *(uint32_t*)chunk; chunk += 4;
+        if (size != data.deckData.queue.size()) throw std::exception("Compare: Size mismatch");
+        for (auto val : data.deckData.queue) { if (*(uint16_t*)chunk != val) throw std::exception("Compare: Value mismatch"); chunk += 2; }
+    }
+
+    {
+        uint8_t* chunk = *iter++;
+        if (memcmp(_offset(data, 0x5e4), chunk, 4)) throw std::exception("Compare: Data mismatch"); chunk += 4;
+        uint32_t size = *(uint32_t*)chunk; chunk += 4;
+        if (size != data.handData.hand.size()) throw std::exception("Compare: Size mismatch");
+        for (auto& val : data.handData.hand) { if (*(uint16_t*)chunk != val.id) throw std::exception("Compare: Value mismatch"); chunk += 2; }
+        size = *(uint32_t*)chunk; chunk += 4;
+        if (size != data.handData.usedCards.size()) throw std::exception("Compare: Size mismatch");
+        for (auto val : data.handData.usedCards) { if (*(uint16_t*)chunk != val) throw std::exception("Compare: Value mismatch"); chunk += 2; }
+    }
+
+    compareChunk(*iter++,  _offset(data, 0x6A4), 0x054);
+    compareChunk(*iter++,  _offset(data, 0x710), 0x004);
+    compareChunk(*iter++,  _offset(data, 0x720), 0x00C);
+    compareChunk(*iter++,  _offset(data, 0x740), 0x010);
+    compareChunk(*iter++,  _offset(data, 0x774), 0x03C);
+    {
+        uint8_t* chunk = *iter++;
+        uint32_t size = *(uint32_t*)chunk; chunk += 4;
+        if (size != data.inputData.commandInputBuffer.size()) throw std::exception("Compare: Size mismatch");
+        for (auto val : data.inputData.commandInputBuffer) { if (*(uint16_t*)chunk != val) throw std::exception("Compare: Value mismatch"); chunk += 2; }
+    }
+    compareChunk(*iter++,  _offset(data, 0x7C4), 0x0CC);
+
+    {
+        auto list = data.objectList->VUnknown24();
+        size_t objectCount = list->size();
+        compareChunk(*iter++, (uint8_t*)&objectCount, 4);
+        for (auto object : *list) {
+            auto header = goHeaders[(void*)object];
+            if (object->parentB) {
+                int index = 0; for(auto it = list->begin(); it != list->end() && object->parentB != (void*)*it; ++it, ++index);
+                if (index >= list->size()) throw std::exception("Serializer: parent not found in list");
+                header.parentIndex = index;
+            } else header.parentIndex = -1;
+            compareChunk(*iter++, (uint8_t*)&header, sizeof(header));
+            compareChunk(*iter++, (uint8_t*)object->unknown35C, header.size * 4);
+            compare(*object);
+        }
+    }
 
     return true;
 }

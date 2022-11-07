@@ -8,6 +8,8 @@ std::unordered_map<void*, GOHeader> goHeaders;
 
 #ifdef _DEBUG
 std::ofstream logging("replay-track.log");
+#define REPLAY_DEBUG
+bool firstRun = true;
 #endif
 
 namespace {
@@ -17,10 +19,7 @@ namespace {
     int (__fastcall* orig_BM_OnBattleEnd)(SokuLib::BattleManager*);
 
     std::deque<std::deque<uint8_t*>> battleState;
-    std::deque<std::deque<uint8_t*>> compareState;
-    bool isComparing = false;
-
-    std::deque<uint8_t*> test;
+    std::deque<uint8_t*> compareState;
 
     typedef SokuLib::v2::GameObject* (__fastcall * SpawnObject_t) (void*, int, void*, void*, SokuLib::Action, float, float, SokuLib::Direction, unsigned char, int, size_t);
     template <SpawnObject_t& orig>
@@ -85,8 +84,23 @@ int __fastcall BM_OnBattleFrame(SokuLib::BattleManager* self) {
     }
 
     if (self->frameCount % 15 == 1) try {
+#ifndef REPLAY_DEBUG
         Serializer serializer(battleState.emplace_back());
         serializer.serialize(SokuLib::getBattleMgr());
+#else
+        if (!battleState.size()) {
+            Serializer serializer(battleState.emplace_back()); serializer.serialize(SokuLib::getBattleMgr());
+        } else if (firstRun) {
+            firstRun = !firstRun;
+            for (auto chunk : compareState) delete[] chunk; compareState.clear();
+            { Serializer serializer(compareState); serializer.serialize(SokuLib::getBattleMgr()); }
+            { Serializer serializer(battleState.back()); serializer.restore(SokuLib::getBattleMgr()); }
+        } else {
+            firstRun = !firstRun;
+            { Serializer serializer(compareState); serializer.compare(SokuLib::getBattleMgr()); }
+            { Serializer serializer(battleState.emplace_back()); serializer.serialize(SokuLib::getBattleMgr()); }
+        } 
+#endif
     } catch (std::exception e) {
         MessageBoxA(0, e.what(), "Replay Rewind", MB_OK);
         battleState.pop_back();
