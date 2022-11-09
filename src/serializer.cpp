@@ -75,7 +75,7 @@ bool Serializer::compare(uint8_t* data, size_t size) {
 bool Serializer::serialize(const SokuLib::BattleManager& data) {
     chunkQueue.push_back(createChunk(_offset(data, 0x004), 0x018));
     chunkQueue.push_back(createChunk(_offset(data, 0x074), 0x018));
-    chunkQueue.push_back(createChunk(_offset(data, 0x868), 0x09C));
+    //chunkQueue.push_back(createChunk(_offset(data, 0x868), 0x09C));
 
     serialize(*(SokuLib::v2::Player*)&data.leftCharacterManager);
     serialize(_offset(data, 0x890), GetPlayerExtraSize(((SokuLib::v2::Player*)&data.leftCharacterManager)->characterIndex));
@@ -96,9 +96,10 @@ bool Serializer::serialize(const SokuLib::BattleManager& data) {
 
     // Globals (Weather)
     serialize((uint8_t*)0x883cc8, 0x04);
-    serialize((uint8_t*)0x8971c0, 0x18);
+    serialize((uint8_t*)0x8971c0, 0x18 + 0x500);
     serialize((uint8_t*)0x8985d8, 0x04);
     serialize((uint8_t*)0x8986dc, 0x04);
+    serialize(*(uint8_t**)0x8971c8, 0x4C);
 
     return true;
 }
@@ -106,7 +107,7 @@ bool Serializer::serialize(const SokuLib::BattleManager& data) {
 bool Serializer::restore(SokuLib::BattleManager& data) {
     restoreChunk(chunkQueue.front(), _offset(data, 0x004), 0x018); chunkQueue.pop_front();
     restoreChunk(chunkQueue.front(), _offset(data, 0x074), 0x018); chunkQueue.pop_front();
-    restoreChunk(chunkQueue.front(), _offset(data, 0x868), 0x09C); chunkQueue.pop_front();
+    //restoreChunk(chunkQueue.front(), _offset(data, 0x868), 0x09C); chunkQueue.pop_front();
 
     restore(*(SokuLib::v2::Player*)&data.leftCharacterManager);
     restore(_offset(data, 0x890), GetPlayerExtraSize(((SokuLib::v2::Player*)&data.leftCharacterManager)->characterIndex));
@@ -127,9 +128,10 @@ bool Serializer::restore(SokuLib::BattleManager& data) {
 
     // Globals (Weather)
     restore((uint8_t*)0x883cc8, 0x04);
-    restore((uint8_t*)0x8971c0, 0x18);
+    restore((uint8_t*)0x8971c0, 0x18 + 0x500);
     restore((uint8_t*)0x8985d8, 0x04);
     restore((uint8_t*)0x8986dc, 0x04);
+    restore(*(uint8_t**)0x8971c8, 0x4C);
 
     return true;
 }
@@ -137,7 +139,7 @@ bool Serializer::restore(SokuLib::BattleManager& data) {
 bool Serializer::compare(SokuLib::BattleManager& data) {
     compareChunk(*iter++, _offset(data, 0x004), 0x018);
     compareChunk(*iter++, _offset(data, 0x074), 0x018);
-    compareChunk(*iter++, _offset(data, 0x868), 0x09C);
+    //compareChunk(*iter++, _offset(data, 0x868), 0x09C);
 
     compare(*(SokuLib::v2::Player*)&data.leftCharacterManager);
     compare(_offset(data, 0x890), GetPlayerExtraSize(((SokuLib::v2::Player*)&data.leftCharacterManager)->characterIndex));
@@ -158,9 +160,10 @@ bool Serializer::compare(SokuLib::BattleManager& data) {
 
     // Globals (Weather)
     compare((uint8_t*)0x883cc8, 0x04);
-    compare((uint8_t*)0x8971c0, 0x18);
+    compare((uint8_t*)0x8971c0, 0x18 + 0x500);
     compare((uint8_t*)0x8985d8, 0x04);
     compare((uint8_t*)0x8986dc, 0x04);
+    compare(*(uint8_t**)0x8971c8, 0x4C);
 
     return true;
 }
@@ -248,9 +251,9 @@ bool Serializer::restore(SokuLib::v2::GameObject& data) {
 bool Serializer::compare(SokuLib::v2::GameObject& data) {
     compare((SokuLib::v2::GameObjectBase&)data);
     compareChunk(*iter++,  _offset(data, 0x34C), 0x004);
-    compareChunk(*iter++,  _offset(data, 0x354), 0x008);
-    // ignore tail
-    compareChunk(*iter++,  _offset(data, 0x360), 0x03C);
+    ++iter; // ignore tail
+    ++iter; // TODO parenting problem
+    // compareChunk(*iter++,  _offset(data, 0x360), 0x03C);
 
     if (((SokuLib::v2::Player*)data.gameData.owner)->characterIndex == SokuLib::CHARACTER_ALICE) {
         compareChunk(*iter++,  _offset(data, 0x3AC), 0x004);
@@ -286,7 +289,8 @@ bool Serializer::serialize(const SokuLib::v2::Player& data) {
     chunkQueue.push_back(createChunk(_offset(data, 0x710), 0x04));
     chunkQueue.push_back(createChunk(_offset(data, 0x720), 0x0C));
     chunkQueue.push_back(createChunk(_offset(data, 0x740), 0x10));
-    chunkQueue.push_back(createChunk(_offset(data, 0x774), 0x3C));
+    chunkQueue.push_back(createChunk((uint8_t*)data.keyManager.keymapManager, 0x078));
+    chunkQueue.push_back(createChunk(_offset(data, 0x754), 0x5C));
     {
         chunkQueue.push_back(createChunk(data.inputData.commandInputBuffer.size()*2 + 4));
         uint8_t* chunk = chunkQueue.back();
@@ -345,7 +349,8 @@ bool Serializer::restore(SokuLib::v2::Player& data) {
     restoreChunk(chunkQueue.front(), _offset(data, 0x710), 0x004); chunkQueue.pop_front();
     restoreChunk(chunkQueue.front(), _offset(data, 0x720), 0x00C); chunkQueue.pop_front();
     restoreChunk(chunkQueue.front(), _offset(data, 0x740), 0x010); chunkQueue.pop_front();
-    restoreChunk(chunkQueue.front(), _offset(data, 0x774), 0x03C); chunkQueue.pop_front();
+    restoreChunk(chunkQueue.front(), (uint8_t*)data.keyManager.keymapManager, 0x078); chunkQueue.pop_front();
+    restoreChunk(chunkQueue.front(), _offset(data, 0x754), 0x05C); chunkQueue.pop_front();
     {
         uint8_t* chunk = chunkQueue.front();
         uint32_t size = *(uint32_t*)chunk; chunk += 4;
@@ -403,7 +408,8 @@ bool Serializer::compare(SokuLib::v2::Player& data) {
     compareChunk(*iter++,  _offset(data, 0x710), 0x004);
     compareChunk(*iter++,  _offset(data, 0x720), 0x00C);
     compareChunk(*iter++,  _offset(data, 0x740), 0x010);
-    compareChunk(*iter++,  _offset(data, 0x774), 0x03C);
+    compareChunk(*iter++,  (uint8_t*)data.keyManager.keymapManager, 0x078);
+    compareChunk(*iter++,  _offset(data, 0x754), 0x05C);
     {
         uint8_t* chunk = *iter++;
         uint32_t size = *(uint32_t*)chunk; chunk += 4;
@@ -423,7 +429,8 @@ bool Serializer::compare(SokuLib::v2::Player& data) {
                 if (index >= list->size()) throw std::exception("Serializer: parent not found in list");
                 header.parentIndex = index;
             } else header.parentIndex = -1;
-            compareChunk(*iter++, (uint8_t*)&header, sizeof(header));
+            ++iter;; // TODO ignore header?
+            // compareChunk(*iter++, (uint8_t*)&header, sizeof(header));
             compareChunk(*iter++, (uint8_t*)object->unknown35C, header.size * 4);
             compare(*object);
         }
