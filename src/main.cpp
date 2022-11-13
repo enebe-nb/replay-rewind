@@ -34,7 +34,7 @@ namespace {
 }
 
 void __fastcall BM_OnInit(SokuLib::BattleManager* self) {
-    if (SokuLib::subMode != SokuLib::BATTLE_SUBMODE_REPLAY) return orig_BM_OnInit(self);
+    if (SokuLib::subMode != SokuLib::BATTLE_SUBMODE_REPLAY || SokuLib::mainMode != SokuLib::BATTLE_MODE_VSPLAYER) return orig_BM_OnInit(self);
 
     auto leftPlayer = reinterpret_cast<SokuLib::v2::Player*(__fastcall*)(int, int, int)>(0x46d9e0)(*(int*)SokuLib::ADDR_GAME_DATA_MANAGER, 0, 0);
     auto rightPlayer = reinterpret_cast<SokuLib::v2::Player*(__fastcall*)(int, int, int)>(0x46d9e0)(*(int*)SokuLib::ADDR_GAME_DATA_MANAGER, 0, 1);
@@ -55,7 +55,7 @@ void __fastcall BM_OnInit(SokuLib::BattleManager* self) {
 
 void* __fastcall BM_OnDestruct(SokuLib::BattleManager* self, int a, int b) {
     goHeaders.clear();
-    if (SokuLib::subMode == SokuLib::BATTLE_SUBMODE_REPLAY) {
+    if (SokuLib::subMode == SokuLib::BATTLE_SUBMODE_REPLAY && SokuLib::mainMode == SokuLib::BATTLE_MODE_VSPLAYER) {
         DWORD old; VirtualProtect((LPVOID)RDATA_SECTION_OFFSET, RDATA_SECTION_SIZE, PAGE_WRITECOPY, &old);
         *orig_SpawnObject[0].first = orig_SpawnObject[0].second;
         if (orig_SpawnObject[1].first)
@@ -67,7 +67,7 @@ void* __fastcall BM_OnDestruct(SokuLib::BattleManager* self, int a, int b) {
 }
 
 int __fastcall BM_OnBattleFrame(SokuLib::BattleManager* self) {
-    if (SokuLib::subMode != SokuLib::BATTLE_SUBMODE_REPLAY) return orig_BM_OnBattleFrame(self);
+    if (SokuLib::subMode != SokuLib::BATTLE_SUBMODE_REPLAY || SokuLib::mainMode != SokuLib::BATTLE_MODE_VSPLAYER) return orig_BM_OnBattleFrame(self);
 
     if (SokuLib::inputMgrs.input.horizontalAxis < 0) {
         if (SokuLib::inputMgrs.input.horizontalAxis%15 == -1 && battleState.size()) try {
@@ -133,7 +133,7 @@ int __fastcall BM_OnBattleFrame(SokuLib::BattleManager* self) {
 }
 
 int __fastcall BM_OnBattleEnd(SokuLib::BattleManager* self) {
-    if (SokuLib::subMode != SokuLib::BATTLE_SUBMODE_REPLAY) return orig_BM_OnBattleFrame(self);
+    if (SokuLib::subMode != SokuLib::BATTLE_SUBMODE_REPLAY || SokuLib::mainMode != SokuLib::BATTLE_MODE_VSPLAYER) return orig_BM_OnBattleFrame(self);
 
     if (SokuLib::inputMgrs.input.horizontalAxis%15 == -1 && battleState.size()) try {
         Serializer serializer(battleState.back());
