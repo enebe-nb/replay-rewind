@@ -1,10 +1,11 @@
 #include <windows.h>
 #include "main.hpp"
 #include "serializer.hpp"
+#include <sstream>
 
 // global variable initialization
 std::filesystem::path modulePath;
-std::unordered_map<void*, GOHeader> goHeaders;
+std::unordered_map<void*, unsigned int> customDataSize;
 
 #ifdef _DEBUG
 std::ofstream logging("replay-track.log");
@@ -13,57 +14,45 @@ bool firstRun = true;
 #endif
 
 namespace {
-    void* (__fastcall* orig_BM_OnDestruct)(SokuLib::BattleManager*, int, int);
-    void (__fastcall* orig_BM_OnInit)(SokuLib::BattleManager*);
     int (__fastcall* orig_BM_OnBattleFrame)(SokuLib::BattleManager*);
     int (__fastcall* orig_BM_OnBattleEnd)(SokuLib::BattleManager*);
 
-    std::deque<std::deque<uint8_t*>> battleState;
-    std::deque<uint8_t*> compareState;
+    std::deque<std::stringstream> battleState;
 
     typedef SokuLib::v2::GameObject* (__fastcall * SpawnObject_t) (void*, int, void*, void*, SokuLib::Action, float, float, SokuLib::Direction, unsigned char, int, size_t);
     template <SpawnObject_t& orig>
     static SokuLib::v2::GameObject* __fastcall SpawnObject(void* self, int unused, void* parent, void* owner, SokuLib::Action actionId, float x, float y, SokuLib::Direction dir, unsigned char layer, int data, size_t size) {
         auto object = orig(self, unused, parent, owner, actionId, x, y, dir, layer, data, size);
-        goHeaders[(void*)object] = {owner, actionId, x, y, dir, layer, size};
-        return object;
+        if (SokuLib::subMode == SokuLib::BATTLE_SUBMODE_REPLAY && SokuLib::mainMode == SokuLib::BATTLE_MODE_VSPLAYER) {
+            customDataSize[(void*)object] = data ? size : 0;
+        } return object;
     }
 
-    std::pair<SpawnObject_t*, SpawnObject_t> orig_SpawnObject[2];
+    std::pair<SpawnObject_t*, SpawnObject_t> orig_SpawnObject[] = {
+        {(SpawnObject_t*)0x85bf1c, 0},
+        {(SpawnObject_t*)0x85c34c, 0},
+        {(SpawnObject_t*)0x85c6d4, 0},
+        {(SpawnObject_t*)0x85c9c4, 0},
+        {(SpawnObject_t*)0x85ccfc, 0},
+        {(SpawnObject_t*)0x85cfac, 0},
+        {(SpawnObject_t*)0x85d254, 0},
+        {(SpawnObject_t*)0x85d4f4, 0},
+        {(SpawnObject_t*)0x85d78c, 0},
+        {(SpawnObject_t*)0x85da54, 0},
+        {(SpawnObject_t*)0x85dd2c, 0},
+        {(SpawnObject_t*)0x85e20c, 0},
+        {(SpawnObject_t*)0x85df7c, 0},
+        {(SpawnObject_t*)0x85e474, 0},
+        {(SpawnObject_t*)0x85e6ec, 0},
+        {(SpawnObject_t*)0x85efbc, 0},
+        {(SpawnObject_t*)0x85ea84, 0},
+        {(SpawnObject_t*)0x85ed0c, 0},
+        {(SpawnObject_t*)0x85f5bc, 0},
+        {(SpawnObject_t*)0x85f28c, 0},
+        {(SpawnObject_t*)0x85f7f4, 0},
+    };
+
     int looplimiting = 0;
-}
-
-void __fastcall BM_OnInit(SokuLib::BattleManager* self) {
-    if (SokuLib::subMode != SokuLib::BATTLE_SUBMODE_REPLAY || SokuLib::mainMode != SokuLib::BATTLE_MODE_VSPLAYER) return orig_BM_OnInit(self);
-
-    auto leftPlayer = reinterpret_cast<SokuLib::v2::Player*(__fastcall*)(int, int, int)>(0x46d9e0)(*(int*)SokuLib::ADDR_GAME_DATA_MANAGER, 0, 0);
-    auto rightPlayer = reinterpret_cast<SokuLib::v2::Player*(__fastcall*)(int, int, int)>(0x46d9e0)(*(int*)SokuLib::ADDR_GAME_DATA_MANAGER, 0, 1);
-
-    DWORD old; VirtualProtect((LPVOID)RDATA_SECTION_OFFSET, RDATA_SECTION_SIZE, PAGE_WRITECOPY, &old);
-    orig_SpawnObject[0].first = &(*(SpawnObject_t**)leftPlayer->objectList)[1];
-    orig_SpawnObject[0].second = (*(SpawnObject_t**)leftPlayer->objectList)[1];
-    (*(SpawnObject_t**)leftPlayer->objectList)[1] = SpawnObject<orig_SpawnObject[0].second>;
-    if (rightPlayer && *(void**)leftPlayer != *(void**)rightPlayer) { // not mirror match
-        orig_SpawnObject[1].first = &(*(SpawnObject_t**)rightPlayer->objectList)[1];
-        orig_SpawnObject[1].second = (*(SpawnObject_t**)rightPlayer->objectList)[1];
-        (*(SpawnObject_t**)rightPlayer->objectList)[1] = SpawnObject<orig_SpawnObject[1].second>;
-    } else orig_SpawnObject[1].first = 0;
-    VirtualProtect((LPVOID)RDATA_SECTION_OFFSET, RDATA_SECTION_SIZE, old, &old);
-
-    return orig_BM_OnInit(self);
-}
-
-void* __fastcall BM_OnDestruct(SokuLib::BattleManager* self, int a, int b) {
-    goHeaders.clear();
-    if (SokuLib::subMode == SokuLib::BATTLE_SUBMODE_REPLAY && SokuLib::mainMode == SokuLib::BATTLE_MODE_VSPLAYER) {
-        DWORD old; VirtualProtect((LPVOID)RDATA_SECTION_OFFSET, RDATA_SECTION_SIZE, PAGE_WRITECOPY, &old);
-        *orig_SpawnObject[0].first = orig_SpawnObject[0].second;
-        if (orig_SpawnObject[1].first)
-            *orig_SpawnObject[1].first = orig_SpawnObject[1].second;
-        VirtualProtect((LPVOID)RDATA_SECTION_OFFSET, RDATA_SECTION_SIZE, old, &old);
-    }
-
-    return orig_BM_OnDestruct(self, a, b);
 }
 
 int __fastcall BM_OnBattleFrame(SokuLib::BattleManager* self) {
@@ -71,8 +60,8 @@ int __fastcall BM_OnBattleFrame(SokuLib::BattleManager* self) {
 
     if (SokuLib::inputMgrs.input.horizontalAxis < 0) {
         if (SokuLib::inputMgrs.input.horizontalAxis%15 == -1 && battleState.size()) try {
-            Serializer serializer(battleState.back());
-            serializer.restore(SokuLib::getBattleMgr());
+            Restore parser(battleState.back());
+            parser.run();
             battleState.pop_back();
         } catch (std::exception e) {
             MessageBoxA(0, e.what(), "Replay Rewind", MB_OK);
@@ -83,24 +72,26 @@ int __fastcall BM_OnBattleFrame(SokuLib::BattleManager* self) {
         return 0;
     }
 
-    if (self->frameCount % 15 == 1) try {
-#ifndef REPLAY_DEBUG
-        Serializer serializer(battleState.emplace_back());
-        serializer.serialize(SokuLib::getBattleMgr());
-#else
-        if (!battleState.size()) {
-            Serializer serializer(battleState.emplace_back()); serializer.serialize(SokuLib::getBattleMgr());
-        } else if (firstRun) {
-            firstRun = !firstRun;
-            for (auto chunk : compareState) delete[] chunk; compareState.clear();
-            { Serializer serializer(compareState); serializer.serialize(SokuLib::getBattleMgr()); }
-            { Serializer serializer(battleState.back()); serializer.restore(SokuLib::getBattleMgr()); }
-        } else {
-            firstRun = !firstRun;
-            { Serializer serializer(compareState); serializer.compare(SokuLib::getBattleMgr()); }
-            { Serializer serializer(battleState.emplace_back()); serializer.serialize(SokuLib::getBattleMgr()); }
-        } 
-#endif
+    if (self->frameCount % 2 == 1) try {
+//#ifndef REPLAY_DEBUG
+        // Serializer serializer(battleState.emplace_back());
+        // serializer.serialize(SokuLib::getBattleMgr());
+        Serialize parser(battleState.emplace_back());
+        parser.run();
+//#else
+        // if (!battleState.size()) {
+        //     Serializer serializer(battleState.emplace_back()); serializer.serialize(SokuLib::getBattleMgr());
+        // } else if (firstRun) {
+        //     firstRun = !firstRun;
+        //     for (auto chunk : compareState) delete[] chunk; compareState.clear();
+        //     { Serializer serializer(compareState); serializer.serialize(SokuLib::getBattleMgr()); }
+        //     { Serializer serializer(battleState.back()); serializer.restore(SokuLib::getBattleMgr()); }
+        // } else {
+        //     firstRun = !firstRun;
+        //     { Serializer serializer(compareState); serializer.compare(SokuLib::getBattleMgr()); }
+        //     { Serializer serializer(battleState.emplace_back()); serializer.serialize(SokuLib::getBattleMgr()); }
+        // } 
+//#endif
     } catch (std::exception e) {
         MessageBoxA(0, e.what(), "Replay Rewind", MB_OK);
         battleState.pop_back();
@@ -135,14 +126,14 @@ int __fastcall BM_OnBattleFrame(SokuLib::BattleManager* self) {
 int __fastcall BM_OnBattleEnd(SokuLib::BattleManager* self) {
     if (SokuLib::subMode != SokuLib::BATTLE_SUBMODE_REPLAY || SokuLib::mainMode != SokuLib::BATTLE_MODE_VSPLAYER) return orig_BM_OnBattleFrame(self);
 
-    if (SokuLib::inputMgrs.input.horizontalAxis%15 == -1 && battleState.size()) try {
-        Serializer serializer(battleState.back());
-        serializer.restore(SokuLib::getBattleMgr());
-        battleState.pop_back();
-    } catch (std::exception e) {
-        MessageBoxA(0, e.what(), "Replay Rewind", MB_OK);
-        battleState.pop_back();
-    }
+    // if (SokuLib::inputMgrs.input.horizontalAxis%15 == -1 && battleState.size()) try {
+    //     Serializer serializer(battleState.back());
+    //     serializer.restore(SokuLib::getBattleMgr());
+    //     battleState.pop_back();
+    // } catch (std::exception e) {
+    //     MessageBoxA(0, e.what(), "Replay Rewind", MB_OK);
+    //     battleState.pop_back();
+    // }
 
     --self->frameCount; // revert change on calling function
     return 0;
@@ -167,6 +158,14 @@ extern "C" __declspec(dllexport) bool CheckVersion(const BYTE hash[16]) {
     return ::memcmp(TARGET_HASH, hash, sizeof TARGET_HASH) == 0;
 }
 
+template <std::size_t... I>
+void setup_ObjectListHooks(std::index_sequence<I...>) {
+    ((
+        orig_SpawnObject[I].second = orig_SpawnObject[I].first[1],
+        orig_SpawnObject[I].first[1] = SpawnObject<orig_SpawnObject[I].second>
+    ), ...);
+}
+
 extern "C" __declspec(dllexport) bool Initialize(HMODULE hMyModule, HMODULE hParentModule) {
     GetModulePath(hMyModule, modulePath);
 #ifdef _DEBUG
@@ -174,15 +173,11 @@ extern "C" __declspec(dllexport) bool Initialize(HMODULE hMyModule, HMODULE hPar
 #endif
 
     DWORD old;
-    VirtualProtect((LPVOID)TEXT_SECTION_OFFSET, TEXT_SECTION_SIZE, PAGE_WRITECOPY, &old);
-    orig_BM_OnInit = SokuLib::TamperNearCall(0x4818ee, BM_OnInit);
-    VirtualProtect((LPVOID)TEXT_SECTION_OFFSET, TEXT_SECTION_SIZE, old, &old);
-
     VirtualProtect((LPVOID)RDATA_SECTION_OFFSET, RDATA_SECTION_SIZE, PAGE_WRITECOPY, &old);
-    orig_BM_OnDestruct = SokuLib::TamperDword(SokuLib::ADDR_VTBL_BATTLE_MANAGER + 0x00, BM_OnDestruct);
-    // orig_BM_OnRender = SokuLib::TamperDword(SokuLib::ADDR_VTBL_BATTLE_MANAGER + 0x38, BM_OnRender);
     orig_BM_OnBattleFrame = SokuLib::TamperDword(SokuLib::ADDR_VTBL_BATTLE_MANAGER + 0x18, BM_OnBattleFrame);
     orig_BM_OnBattleEnd = SokuLib::TamperDword(SokuLib::ADDR_VTBL_BATTLE_MANAGER + 0x20, BM_OnBattleEnd);
+
+    setup_ObjectListHooks(std::make_index_sequence<sizeof(orig_SpawnObject)/sizeof(orig_SpawnObject[0])>());
     VirtualProtect((LPVOID)RDATA_SECTION_OFFSET, RDATA_SECTION_SIZE, old, &old);
 
     return true;
