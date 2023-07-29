@@ -2,6 +2,7 @@
 
 #include <SokuLib.hpp>
 #include <WeatherManager.hpp>
+#include <StageManager.hpp>
 #include <InfoManager.hpp>
 #include <map>
 #include <ostream>
@@ -63,12 +64,13 @@ public:
     virtual bool parseHandle(unsigned int&) = 0;
     virtual size_t parseCustom(void*&, size_t) = 0;
 
-    inline void parse(unsigned short& data) { unsigned int tmp; parse(tmp); data = tmp; }
+    inline void parse(unsigned short& data) { unsigned int tmp = data; parse(tmp); data = tmp; }
     inline void parse(SokuLib::Sprite& data) { parse((char*)&data, sizeof(data)); }
     inline void parse(SokuLib::SpriteEx& data) { parse((char*)&data, sizeof(data)); }
 
+    //template<class T> inline void parse(T *& data) { parse((unsigned int&)data); }
     template<class T> void parse(SokuLib::HandleManagerEx<T>&);
-    template<class T> void parse(SokuLib::v2::EffectManager<T>& data);
+    template<class T> void parse(SokuLib::v2::EffectManager<T>&);
     template<typename T> void parse(SokuLib::Vector<T>&);
     template<typename T> void parse(SokuLib::List<T>&);
     template<typename T> void parse(SokuLib::Deque<T>&);
@@ -81,7 +83,8 @@ public:
     void parse(SokuLib::v2::SystemEffectObject& data);
     void parse(SokuLib::v2::SystemEffectManager& data);
     void parse(SokuLib::v2::AnimationObject& data);
-    void parse(SokuLib::v2::EffectObjectBase& data);
+    void parse(SokuLib::v2::EffectObject& data);
+    void parse(SokuLib::v2::InfoEffectObject& data);
     void parse(SokuLib::v2::WeatherEffectObject& data);
     void parse(SokuLib::v2::GameObjectBase& data);
     void parse(SokuLib::v2::TailObject& data);
@@ -92,7 +95,9 @@ public:
     void parse(SokuLib::v2::Player::HandInfo& data);
     void parse(SokuLib::v2::Player::InputInfo& data);
     void parse(SokuLib::v2::GameDataManager& data);
+    void parse(SokuLib::v2::StageManager& data);
     void parse(SokuLib::BattleManager& data);
+    void parse(SokuLib::v2::InfoManagerBase& data);
     void parse(SokuLib::v2::WeatherManager& data);
 
     void run();

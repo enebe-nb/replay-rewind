@@ -4,7 +4,6 @@
 #include <sstream>
 
 // global variable initialization
-std::filesystem::path modulePath;
 std::unordered_map<void*, unsigned int> customDataSize;
 
 #ifdef _DEBUG
@@ -62,6 +61,7 @@ int __fastcall BM_OnBattleFrame(SokuLib::BattleManager* self) {
         if (SokuLib::inputMgrs.input.horizontalAxis%15 == -1 && battleState.size()) try {
             Restore parser(battleState.back());
             parser.run();
+            parser.parse(*reinterpret_cast<SokuLib::Deque<unsigned short>*>(*(int*)((int)&SokuLib::inputMgr + 0x104) + 0x3c));
             battleState.pop_back();
         } catch (std::exception e) {
             MessageBoxA(0, e.what(), "Replay Rewind", MB_OK);
@@ -78,6 +78,7 @@ int __fastcall BM_OnBattleFrame(SokuLib::BattleManager* self) {
         // serializer.serialize(SokuLib::getBattleMgr());
         Serialize parser(battleState.emplace_back());
         parser.run();
+        parser.parse(*reinterpret_cast<SokuLib::Deque<unsigned short>*>(*(int*)((int)&SokuLib::inputMgr + 0x104) + 0x3c));
 //#else
         // if (!battleState.size()) {
         //     Serializer serializer(battleState.emplace_back()); serializer.serialize(SokuLib::getBattleMgr());
@@ -140,19 +141,6 @@ int __fastcall BM_OnBattleEnd(SokuLib::BattleManager* self) {
 }
 
 
-static bool GetModulePath(HMODULE handle, std::filesystem::path& result) {
-    // use wchar for better path handling
-    std::wstring buffer;
-    int len = MAX_PATH + 1;
-    do {
-        buffer.resize(len);
-        len = GetModuleFileNameW(handle, buffer.data(), buffer.size());
-    } while(len > buffer.size());
-
-    if (len) result = std::filesystem::path(buffer.begin(), buffer.begin()+len).parent_path();
-    return len;
-}
-
 const BYTE TARGET_HASH[16] = {0xdf, 0x35, 0xd1, 0xfb, 0xc7, 0xb5, 0x83, 0x31, 0x7a, 0xda, 0xbe, 0x8c, 0xd9, 0xf5, 0x3b, 0x2e};
 extern "C" __declspec(dllexport) bool CheckVersion(const BYTE hash[16]) {
     return ::memcmp(TARGET_HASH, hash, sizeof TARGET_HASH) == 0;
@@ -167,11 +155,6 @@ void setup_ObjectListHooks(std::index_sequence<I...>) {
 }
 
 extern "C" __declspec(dllexport) bool Initialize(HMODULE hMyModule, HMODULE hParentModule) {
-    GetModulePath(hMyModule, modulePath);
-#ifdef _DEBUG
-    logging << "modulePath: " << modulePath << std::endl;
-#endif
-
     DWORD old;
     VirtualProtect((LPVOID)RDATA_SECTION_OFFSET, RDATA_SECTION_SIZE, PAGE_WRITECOPY, &old);
     orig_BM_OnBattleFrame = SokuLib::TamperDword(SokuLib::ADDR_VTBL_BATTLE_MANAGER + 0x18, BM_OnBattleFrame);

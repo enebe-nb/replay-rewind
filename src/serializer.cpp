@@ -106,7 +106,7 @@ size_t Restore::parseCustom(void*& data, size_t size) {
     char major;
     size_t sizeB = cbor::Head(stream, major);
     if (major != cbor::BINARY) throw std::runtime_error("Head not valid for binary");
-    if (sizeB != size) {
+    if (!data || sizeB != size) {
         if (data) { SokuLib::DeleteFct(data); data = 0; }
         if (sizeB) { data = SokuLib::NewFct(sizeB); }
     }
@@ -124,8 +124,15 @@ template<typename T> void BaseVisitor::parse(Vector<T>& data) {
 
 template<typename T> void BaseVisitor::parse(List<T>& data) {
     size_t size = arraySize(data.size());
-    if (size != data.size()) data.resize(size); // TODO check validity
-    for (auto& val : data) parse(val);
+    if (size != data.size()) {
+        if (!data.size() && !((int*)&data)[1]) {
+            // behaviour difference betwen STL
+            ((int*)&data)[1] = (int)SokuLib::NewFct(sizeof(T) + 0x8);
+            ((int**)&data)[1][1] = ((int**)&data)[1][0] = ((int*)&data)[1];
+        }
+        data.resize(size);
+    }
+    if (size) for (auto& val : data) parse(val);
 }
 
 template<typename T> void BaseVisitor::parse(Deque<T>& data) {
@@ -152,18 +159,18 @@ template<class T> void BaseVisitor::parse(HandleManagerEx<T>& data) {
     parse(data.nextBase);
 
     size_t size = arraySize(data.usedIndexes.size());
+    if (size > data.usedIndexes.size()) throw std::runtime_error("Can't restore HandleManagerEx size to a bigger value.");
+    for (int i = 0; i < size; ++i) {
+        if (parseHandle(data.usedIndexes[i])) data.vector[i]->~T(); 
+    }
+
     while (size < data.usedIndexes.size()) {
         if (data.usedIndexes[size]) {
             data.vector[size]->~T();
             data.usedIndexes[size] = 0;
         } data.unusedIndexes.push_back(size++);
     }
-    if (size != data.usedIndexes.size()) throw std::runtime_error("Can't restore HandleManagerEx size to a bigger value.");
     // TODO data.mutex.unlock();
-
-    for (int i = 0; i < size; ++i) {
-        if (parseHandle(data.usedIndexes[i])) data.vector[i]->~T(); 
-    }
 
     // the data in the handles is processed by the owning object (or i hope so)
 }
@@ -180,7 +187,8 @@ template<class T> void BaseVisitor::parse(v2::EffectManager<T>& data) {
     parse(*(List<unsigned int>*)&data.effects);
     size_t size = arraySize(data.effects.size());
     if (size != data.effects.size()) throw std::runtime_error("Size of pointers and objects must be the same.");
-    for (auto effect : data.effects) parse(*effect);
+    const auto parseFn = (void (BaseVisitor::*)(T&))&BaseVisitor::parse; // <- argument deduction problems
+    for (T* effect : data.effects) (this->*parseFn)(*effect);
 }
 
 void BaseVisitor::parse(Vector2f& data) {
@@ -207,8 +215,10 @@ void BaseVisitor::parse(CardInfo& data) {
 }
 
 void BaseVisitor::parse(v2::SystemEffectObject& data) {
-    arraySize(3);
+    arraySize(4);
 
+    // vtable (required for restoration from HandleManagerEx)
+    parse(*(unsigned int*)&data);
     // unknown04,08
     parse((char*)&data.unknown04, 0x08);
     // sprite
@@ -235,8 +245,10 @@ void BaseVisitor::parse(v2::SystemEffectManager& data) {
 }
 
 void BaseVisitor::parse(v2::AnimationObject& data) {
-    arraySize(3);
+    arraySize(4);
 
+    // vtable (required for restoration from HandleManagerEx)
+    parse(*(unsigned int*)&data);
     // sprite
     parse(data.sprite);
     // coords and renderInfo TODO remove align
@@ -245,21 +257,29 @@ void BaseVisitor::parse(v2::AnimationObject& data) {
     parse((char*)&data.frameState, sizeof(data.frameState) +0x04);
 }
 
-void BaseVisitor::parse(SokuLib::v2::EffectObjectBase& data) {
-    arraySize(2);
+void BaseVisitor::parse(SokuLib::v2::EffectObject& data) {
+    arraySize(3);
     parse((v2::AnimationObject&)data);
-    // contains pointers to Sequence data that won't be reallocated
     parse((char*)&data.unknown158, 0x15);
+    parse((char*)&data.unknown170, 0x08);
+}
+
+void BaseVisitor::parse(SokuLib::v2::InfoEffectObject& data) {
+    arraySize(3);
+    parse((v2::AnimationObject&)data);
+    parse((char*)&data.unknown158, 0x15);
+    parse((char*)&data.unknown170, 0x08);
 }
 
 void BaseVisitor::parse(SokuLib::v2::WeatherEffectObject& data) {
-    arraySize(2);
-    parse((v2::EffectObjectBase&)data);
+    arraySize(3);
+    parse((v2::AnimationObject&)data);
+    parse((char*)&data.unknown158, 0x15);
     parse((char*)&data.unknown170, 0x10);
 }
 
 void BaseVisitor::parse(v2::GameObjectBase& data) {
-    arraySize(5);
+    arraySize(4);
 
     // base class
     parse((v2::AnimationObject&)data);
@@ -467,6 +487,14 @@ void BaseVisitor::parse(v2::GameDataManager& data) {
     }
 }
 
+void BaseVisitor::parse(v2::StageManager& data) {
+    //arraySize(1);
+    // TODO active background requires class detection (but it is not expected to change)
+
+    // extra data
+    parse((char*)&data +0x40, 0xD8);
+}
+
 void BaseVisitor::parse(BattleManager& data) {
     arraySize(4);
 
@@ -480,41 +508,59 @@ void BaseVisitor::parse(BattleManager& data) {
     parse((char*)&data +0x900, sizeof(0x08));
 }
 
+void BaseVisitor::parse(v2::InfoManagerBase& data) {
+    //arraySize(1);
+
+    // Gui Effects
+    parse(data.effects);
+
+    // TODO GUI Elements (CDesign)
+
+    // TODO Other data
+}
+
 void BaseVisitor::parse(v2::WeatherManager& data) {
     arraySize(4);
 
-    // weather ids
+    // weather and sky ids
     parse((char*)&data, sizeof(0x05));
-    // tex ids
-    parse(data.someTexIds);
-    // sprites
-    parse(data.someSprites);
     // maybe the weather display (text)
-    parse(*(Deque<std::pair<unsigned int, unsigned int>>*)&data.unknown28);
-    // (ignore) maybe the map that choose which effect to pla in each stage
-    //parse(data.unknown3C);
+    parse(*(Deque<std::pair<unsigned int, unsigned int>>*)&data.activeSky);
     // EffectManager
     parse(data.effects);
     // some float at the end
     parse((char*)&data.unknownDC, sizeof(0x10));
+
+    // (ignore) loaded sky data
+    //parse(data.skyTexIds);
+    //parse(data.skySprites);
+    //parse(data.stageToSkyMap);
 }
 
 void BaseVisitor::run() {
-    arraySize(8);
+    arraySize(13);
+    parse(*(unsigned int*)0x8985d8); // battle frame counter
     parse(*v2::GameDataManager::instance); // 0x8985DC
+    parse(*v2::StageManager::instance); // 0x8985E0
     parse(SokuLib::getBattleMgr()); // 0x8985E4
+    parse(*v2::InfoManagerBase::instance); // 0x8985E8
     parse(*v2::WeatherManager::instance); // 0x8985EC
+    parse(**(v2::EffectManager_Effect**)0x8985F0); // 0x8985F0
 
     // random seed
     parse((char*)0x89b660, 0x9C0);
     parse((char*)0x896b20, 0x004);
 
+    // other data
     parse((char*)0x883cc8, 0x04); // two bytes used in battle manager
-    parse((char*)0x8971c0, 0x18); // global weather variables (maybe 0x500 after it)
-    parse((char*)0x8985d8, 0x04); // battle frame counter
-    //parse((char*)0x8986dc, 0x04);
-    //parse(*(char**)0x8971c8, 0x4C);
+    parse((char*)0x8971c0, 0x18); // global weather variables (maybe 0x500 or 0x1400 after it)
+    parse((char*)0x89aaf8, 0x04); // (timer?) something related to transitions
+    parse((char*)0x88526c, 0x04); // (weatherId?) something related to transitions
+
+    // TODO input data
 }
+
+v2::InfoManagerBase*& v2::InfoManagerBase::instance = *(v2::InfoManagerBase**)0x8985E8;
 
 /*
 bool Serializer::serialize(const SokuLib::BattleManager& data) {

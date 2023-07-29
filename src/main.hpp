@@ -3,7 +3,6 @@
 #include <unordered_map>
 #include <SokuLib.hpp>
 
-extern std::filesystem::path modulePath;
 extern std::unordered_map<void*, unsigned int> customDataSize;
 
 #ifdef _DEBUG
